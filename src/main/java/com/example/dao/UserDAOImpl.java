@@ -59,10 +59,26 @@ public class UserDAOImpl implements UserDAO {
         Transaction transaction = null;
         try (Session session = HibernateUtil.getSessionFactory().openSession()) {
             transaction = session.beginTransaction();
-            session.update(user);
-            transaction.commit();
-            logger.info("User updated successfully: " + user.getEmail());
-            return user;
+
+            // Оптимизация: используем один запрос вместо загрузки + обновления
+            Query<?> query = session.createQuery(
+                    "UPDATE User SET name = :name, email = :email, age = :age WHERE id = :id"
+            );
+            query.setParameter("name", user.getName());
+            query.setParameter("email", user.getEmail());
+            query.setParameter("age", user.getAge());
+            query.setParameter("id", user.getId());
+
+            int result = query.executeUpdate();
+
+            if (result > 0) {
+                transaction.commit();
+                logger.info("User updated successfully: " + user.getEmail());
+                return user;
+            } else {
+                transaction.rollback();
+                throw new UserException("User not found with id: " + user.getId());
+            }
         } catch (Exception e) {
             if (transaction != null) {
                 transaction.rollback();
@@ -77,14 +93,22 @@ public class UserDAOImpl implements UserDAO {
         Transaction transaction = null;
         try (Session session = HibernateUtil.getSessionFactory().openSession()) {
             transaction = session.beginTransaction();
-            User user = session.get(User.class, id);
-            if (user != null) {
-                session.delete(user);
-                transaction.commit();
+
+            // Оптимизация: используем один запрос вместо загрузки + удаления
+            Query<?> query = session.createQuery("DELETE FROM User WHERE id = :id");
+            query.setParameter("id", id);
+
+            int result = query.executeUpdate();
+            transaction.commit();
+
+            boolean deleted = result > 0;
+            if (deleted) {
                 logger.info("User deleted successfully: " + id);
-                return true;
+            } else {
+                logger.info("User not found for deletion: " + id);
             }
-            return false;
+
+            return deleted;
         } catch (Exception e) {
             if (transaction != null) {
                 transaction.rollback();
